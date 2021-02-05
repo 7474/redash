@@ -16,6 +16,7 @@ x-redash-environment: &redash-environment
   REDASH_MAIL_DEFAULT_SENDER: "redash@example.com"
   REDASH_MAIL_SERVER: "email"
   REDASH_ENFORCE_CSRF: "true"
+  REDASH_ADDITIONAL_QUERY_RUNNERS: "redash.query_runner.mackerel"
 services:
   server:
     <<: *redash-service
