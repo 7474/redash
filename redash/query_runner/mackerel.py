@@ -1,6 +1,6 @@
 import requests
-import time
 import logging
+import re
 from datetime import datetime
 from dateutil import parser
 from redash.query_runner import BaseQueryRunner, register, TYPE_DATETIME, TYPE_STRING, TYPE_FLOAT
@@ -73,10 +73,23 @@ class Mackerel(BaseQueryRunner):
         try:
             error = None
             queries = query.strip().splitlines()
+            q_to = int(datetime.now().timestamp())
+            q_from = q_to - 60 * 60
 
             for query in queries:
+                if query.isspace():
+                    continue
+                m = re.match(r'from=(.*)', query)
+                if m:
+                    q_from = m.groups()[0]
+                    continue
+                m = re.match(r'to=(.*)', query)
+                if m:
+                    q_to = m.groups()[0]
+                    continue
+
                 metric_name = query.replace('metrics?name=', '')
-                api_endpoint = base_url + "/api/v0{}".format(query)
+                api_endpoint = base_url + "/api/v0{}&from={}&to={}".format(query, q_from, q_to)
 
                 response = requests.get(api_endpoint, headers=headers)
                 response.raise_for_status()
@@ -99,7 +112,7 @@ class Mackerel(BaseQueryRunner):
 
             rows = []
             last_value_map = dict(zip(metric_names, [0 for m in metric_names]))
-            for time in results:
+            for time in sorted(results.keys()):
                 row = {"timestamp": datetime.fromtimestamp(time)}
                 for metric_name in metric_names:
                     if metric_name in results[time]:
