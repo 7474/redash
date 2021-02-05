@@ -67,30 +67,48 @@ class Mackerel(BaseQueryRunner):
         columns = [
             {"friendly_name": "timestamp", "type": TYPE_DATETIME, "name": "timestamp"},
         ]
+        metric_names = []
         results = {}
 
         try:
             error = None
-            query = query.strip()
             queries = query.strip().splitlines()
 
-            api_endpoint = base_url + query
+            for query in queries:
+                metric_name = query.replace('metrics?name=', '')
+                api_endpoint = base_url + "/api/v0{}".format(query)
 
-            response = requests.get(api_endpoint, headers=headers)
-            response.raise_for_status()
+                response = requests.get(api_endpoint, headers=headers)
+                response.raise_for_status()
 
-            metrics = response.json()["metrics"]
-            logging.info(json_dumps(metrics))
+                metrics = response.json()["metrics"]
+                logging.info(json_dumps(metrics))
 
-            columns.append(
-                {
-                    "friendly_name": query,
-                    "type": TYPE_FLOAT,
-                    "name": query,
-                }
-            )
+                columns.append(
+                    {
+                        "friendly_name": query,
+                        "type": TYPE_FLOAT,
+                        "name": metric_name,
+                    }
+                )
+                metric_names.append(metric_name)
+                for metric in metrics:
+                    if metric['time'] not in results:
+                        results[metric['time']] = {}
+                    results[metric['time']][metric_name] = metric['value']
 
-            rows = [dict(zip(["timestamp", query], [datetime.fromtimestamp(metric['time']), metric['value']])) for metric in metrics]
+            rows = []
+            last_value_map = dict(zip(metric_names, [0 for m in metric_names]))
+            for time in results:
+                row = {"timestamp": datetime.fromtimestamp(time)}
+                for metric_name in metric_names:
+                    if metric_name in results[time]:
+                        row[metric_name] = results[time][metric_name]
+                        last_value_map[metric_name] = results[time][metric_name]
+                    else:
+                        # XXX フェイルバック値
+                        row[metric_name] = last_value_map[metric_name]
+                rows.append(row)
 
             logging.info(json_dumps({"rows": rows, "columns": columns}))
             json_data = json_dumps({"rows": rows, "columns": columns})
