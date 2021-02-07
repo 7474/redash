@@ -37,18 +37,43 @@ class Mackerel(BaseQueryRunner):
         return resp.ok
 
     def get_schema(self, get_stats=False):
-        base_url = self.configuration["base_url"]
-        api_key = str(self.configuration.get('api_key'))
-        headers = {'X-Api-Key': api_key}
-        metrics_path = "/api/v0/services"
-        response = requests.get(base_url + metrics_path, headers=headers)
-        response.raise_for_status()
-        services = response.json()["services"]
+        try:
+            base_url = self.configuration["base_url"]
+            api_key = str(self.configuration.get('api_key'))
+            headers = {'X-Api-Key': api_key}
 
-        schema = {}
-        for name in services:
-            schema[name] = {"name": name, "columns": []}
-        return list(schema.values())
+            schema = {}
+
+            # https://mackerel.io/ja/api-docs/entry/services
+            response = requests.get(base_url + "/api/v0/services", headers=headers)
+            response.raise_for_status()
+            services = response.json()["services"]
+            for service in services:
+                service_name = service["name"]
+                response = requests.get(base_url + "/api/v0/services/{}/metric-names".format(service_name), headers=headers)
+                response.raise_for_status()
+                names = response.json()["names"]
+                columns = ["/services/{}/metrics?name={}".format(service_name, name) for name in names]
+                schema[service_name] = {"name": service_name, "columns": columns}
+
+            # https://mackerel.io/ja/api-docs/entry/hosts
+            response = requests.get(base_url + "/api/v0/hosts", headers=headers)
+            response.raise_for_status()
+            hosts = response.json()["hosts"]
+            for host in hosts:
+                host_id = host["id"]
+                host_name = host["name"]
+                response = requests.get(base_url + "/api/v0/hosts/{}/metric-names".format(host_id), headers=headers)
+                response.raise_for_status()
+                names = response.json()["names"]
+                columns = ["/hosts/{}/metrics?name={}".format(host_id, name) for name in names]
+                schema[host_id] = {"name": host_name, "columns": columns}
+
+            logging.info(json_dumps(schema))
+            return list(schema.values())
+        except requests.RequestException as e:
+            logging.error(e)
+            raise 
 
     def run_query(self, query, user):
         """
@@ -79,13 +104,21 @@ class Mackerel(BaseQueryRunner):
             for query in queries:
                 if query.isspace():
                     continue
-                m = re.match(r'from=(.*)', query)
+                m = re.match(r'from=(\d+)$', query)
                 if m:
                     q_from = m.groups()[0]
                     continue
-                m = re.match(r'to=(.*)', query)
+                m = re.match(r'to=(\d+)$', query)
                 if m:
                     q_to = m.groups()[0]
+                    continue
+                m = re.match(r'from=(.+)', query)
+                if m:
+                    q_from = int(parser.parse(m.groups()[0]).timestamp())
+                    continue
+                m = re.match(r'to=(.+)', query)
+                if m:
+                    q_to = int(parser.parse(m.groups()[0]).timestamp())
                     continue
 
                 metric_name = query.replace('metrics?name=', '')
